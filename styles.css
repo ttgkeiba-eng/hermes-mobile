@@ -1,0 +1,139 @@
+/* Hermes Mobile / ダークテーマ固定。
+   通知を確認するだけの画面なので、色はアイコン・manifest と揃えた 1 系統だけ持つ。 */
+
+:root {
+  --bg: #0b1220;
+  --surface: #131c2e;
+  --border: #22304a;
+  --text: #e8eefc;
+  --muted: #8fa1c0;
+  --accent: #7ad6ff;
+  --ok: #64d99a;
+  --bad: #ff8080;
+  --warn: #ffcc66;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  max-width: 460px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: calc(100vh - 40px);
+}
+
+/* ── ヘッダ ── */
+.head { display: flex; align-items: center; gap: 14px; }
+
+.mark {
+  width: 46px; height: 46px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 800;
+  font-size: 26px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+h1 { margin: 0; font-size: 21px; letter-spacing: .02em; }
+.sub { margin: 0; color: var(--muted); font-size: 13px; }
+
+/* ── カード ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.card h2 { margin: 0 0 14px; font-size: 15px; color: var(--muted); font-weight: 600; }
+
+label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 12px 0 6px;
+}
+
+input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  /* 16px 未満だと iOS Safari がフォーカス時に画面を拡大する */
+  font-size: 16px;
+}
+
+input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── 行 ── */
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.row:last-of-type { border-bottom: none; }
+
+.label { color: var(--muted); font-size: 13px; flex: none; }
+.value { font-size: 14px; text-align: right; word-break: break-all; }
+.value.ok  { color: var(--ok); }
+.value.bad { color: var(--bad); }
+
+/* ── ボタン ── */
+.actions { display: flex; flex-direction: column; gap: 9px; margin-top: 16px; }
+
+button {
+  font: inherit;
+  font-size: 15px;
+  padding: 13px 16px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+
+button:disabled { opacity: .5; cursor: default; }
+
+.primary { background: var(--accent); color: var(--bg); font-weight: 700; }
+.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+.ghost.danger { color: var(--bad); }
+
+.link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  padding: 12px 0 0;
+  font-size: 13px;
+  align-self: flex-start;
+}
+
+/* ── 状態表示 ── */
+.hint { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); }
+
+.status { margin: 0; font-size: 14px; min-height: 1.6em; }
+.status.ok   { color: var(--ok); }
+.status.bad  { color: var(--bad); }
+.status.warn { color: var(--warn); }
+
+.foot { margin-top: auto; padding-top: 12px; }
+.diag { font-size: 11px; color: var(--muted); opacity: .7; }

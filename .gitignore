@@ -1,0 +1,16 @@
+# このリポジトリはビルド工程を持たない。配信物 = リポジトリの中身。
+# icons/ は生成物だが、GitHub Pages がそのまま配るので **コミットする**。
+
+.DS_Store
+Thumbs.db
+*.log
+
+# 万一 Vite などを足したとき用
+node_modules/
+dist/
+.vite/
+
+# 秘密は置かない設計だが、うっかり用の網
+.env
+.env.*
+*.pem

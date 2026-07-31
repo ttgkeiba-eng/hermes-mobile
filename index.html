@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover + env(safe-area-inset-*) でノッチ端末でも切れないようにする -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hermes</title>
+
+<!-- すべて相対パス。GitHub Pages は /<repo>/ 配下に置かれるので、
+     絶対パス（/manifest.webmanifest）にするとルートを見に行って 404 になる。 -->
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<meta name="theme-color" content="#0b1220">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<main class="app">
+  <header class="head">
+    <div class="mark" aria-hidden="true">H</div>
+    <div>
+      <h1>Hermes</h1>
+      <p class="sub">日次スクリーニング通知</p>
+    </div>
+  </header>
+
+  <!-- 起動直後はどちらのカードも隠しておき、セッション判定後に出し分ける -->
+  <section id="login-card" class="card" hidden>
+    <h2>ログイン</h2>
+    <form id="login-form" novalidate>
+      <label for="email">メールアドレス</label>
+      <input id="email" type="email" autocomplete="username" required
+             inputmode="email" autocapitalize="off" spellcheck="false">
+
+      <label for="password">パスワード</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+
+      <button type="submit" class="primary" id="login-button">ログイン</button>
+    </form>
+  </section>
+
+  <section id="main-card" class="card" hidden>
+    <div class="row">
+      <span class="label">アカウント</span>
+      <span id="user-email" class="value"></span>
+    </div>
+    <div class="row">
+      <span class="label">通知</span>
+      <span id="push-state" class="value">確認中…</span>
+    </div>
+
+    <div class="actions">
+      <button id="enable-button" class="primary">通知を有効化</button>
+      <button id="test-button" class="ghost" hidden>テスト表示</button>
+      <button id="disable-button" class="ghost danger" hidden>通知を解除</button>
+    </div>
+
+    <p class="hint" id="hint"></p>
+
+    <button id="logout-button" class="link">ログアウト</button>
+  </section>
+
+  <!-- 成否も理由もここに出す。通知まわりは失敗が静かなので、必ず文字で見せる -->
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <footer class="foot">
+    <span id="diag" class="diag"></span>
+  </footer>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
