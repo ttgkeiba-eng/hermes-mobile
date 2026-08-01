@@ -42,15 +42,14 @@ hermes-mobile/
 
 画面が育ってきたら Vite に移す。そのときも `sw.js` はほぼそのまま使える。
 
-## 前提（先に済ませること）
+## 前提
 
-> **`push_subscriptions` テーブルがまだ本番に存在しない。**
-> 確認したところ PostgREST が 404 を返す＝マイグレーション未適用。
-> このアプリを動かす前に hermes-project 側で適用する:
->
-> ```bash
-> ./supabase/tools/apply_migrations.sh --allow-data
-> ```
+サーバ側は用意済み（2026-08-02 時点）:
+
+- `push_subscriptions` テーブル: **作成済み**（RLS 有効 / 0 行）
+- Edge Function `send-push`: **デプロイ済み**（ACTIVE）
+- VAPID Secrets 3 本: **投入済み**（手元の鍵とダイジェスト一致を確認）
+- `notifications` のトリガー: **未作成**（購読ができてから最後に張る）
 
 ### ⚠ 新規登録を必ず無効化すること
 
@@ -83,38 +82,40 @@ Chrome の DevTools → Application タブで、Manifest / Service Workers / Pus
 
 ## GitHub へ公開する
 
-`gh` CLI がこの環境に無いので、リポジトリ作成から手で行う。
+### 1. リポジトリと push（済み）
 
-### 1. リポジトリを作る
+<https://github.com/ttgkeiba-eng/hermes-mobile> に push 済み（public / 既定ブランチ `main`）。
 
-GitHub → **New repository** →
-
-| 項目 | 値 |
-| --- | --- |
-| Repository name | `hermes-mobile` |
-| Visibility | **Public**（Pages を無料で使うため。Pro なら Private でも可） |
-| Initialize | 何も追加しない（README も .gitignore も付けない） |
-
-### 2. push する
-
-このディレクトリで既に `git init` + 初回コミットまで済んでいる。リモートを繋いで押すだけ:
+リモートは **SSH** で繋いである:
 
 ```bash
-cd ~/hermes-mobile
-git remote add origin https://github.com/<ユーザー名>/hermes-mobile.git
-git push -u origin main
+git remote -v
+# origin  git@github.com:ttgkeiba-eng/hermes-mobile.git
 ```
 
-### 3. Pages を有効化する
+HTTPS ではなく SSH なのは、この環境に HTTPS 用の資格情報が無く、
+`hermes-project` / `trader-knowledge` も同じ SSH 鍵で運用されているため。
+以降の更新は `git push` だけでよい。
+
+### 2. Pages を有効化する
 
 リポジトリ → **Settings → Pages**:
 
 | 項目 | 値 |
 | --- | --- |
 | Source | **Deploy from a branch** |
-| Branch | `main` / `/ (root)` |
+| Branch | `main` |
+| Folder | **`/ (root)`** ← `docs` ではない |
 
-1 分ほどで `https://<ユーザー名>.github.io/hermes-mobile/` に出る。
+**`/ (root)` を選ぶ理由**: `index.html` / `manifest.webmanifest` / `sw.js` は
+すべてリポジトリ直下にある。`docs` を選ぶと何も配信されない。
+`docs/` に移すとビルド無しの利点（push = デプロイ）が崩れるので、そのままにしている。
+
+1 分ほどで下記に出る:
+
+```text
+https://ttgkeiba-eng.github.io/hermes-mobile/
+```
 
 > **末尾のスラッシュを省かないこと。** `…/hermes-mobile` だと相対パスの解決が
 > 1 階層ずれて `sw.js` や `manifest.webmanifest` が 404 になる。
