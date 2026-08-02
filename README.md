@@ -49,7 +49,7 @@ hermes-mobile/
 - `push_subscriptions` テーブル: **作成済み**（RLS 有効 / 0 行）
 - Edge Function `send-push`: **デプロイ済み**（ACTIVE）
 - VAPID Secrets 3 本: **投入済み**（手元の鍵とダイジェスト一致を確認）
-- `notifications` のトリガー: **未作成**（購読ができてから最後に張る）
+- `notifications` のトリガー: **有効**（INSERT → 約 1.5 秒で自動配信）
 
 ### ⚠ 新規登録を必ず無効化すること
 
