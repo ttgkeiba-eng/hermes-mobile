@@ -12,7 +12,15 @@
 // 送られてくる JSON は send-push の buildPayload と対になっている:
 //   { id, type, title, body, data }
 
-const VERSION = "hermes-sw-v1";
+const VERSION = "hermes-sw-v2";
+
+// 通知の種類ごとの着地先（アプリ内ハッシュルート）。
+// 未知の種類はホームに落とす。存在しない画面へ飛ばして空白を見せない。
+const LANDING = {
+  batch_done: "#/",
+  diff_report: "#/",
+  tdnet_hit: "#/",
+};
 
 self.addEventListener("install", () => {
   // 新しい SW を待たせない。通知の出し方を直したらすぐ効いてほしい。
@@ -63,8 +71,15 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
+  const data = event.notification.data || {};
   // SW から見た自分のスコープ = アプリのトップ。GitHub Pages の /<repo>/ でも正しい。
   const scopeUrl = new URL("./", self.location.href).href;
+  // batch_done は「その日の結果が出た」合図なので、ホーム（1位のヒーロー）に着地させる。
+  // data.ticker が入っている通知（将来の tdnet_hit 想定）はその銘柄の詳細へ。
+  const landing = data.ticker
+    ? `#/s/${encodeURIComponent(data.ticker)}`
+    : (LANDING[data.type] || "#/");
+  const targetUrl = scopeUrl + landing;
 
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({
@@ -75,13 +90,21 @@ self.addEventListener("notificationclick", (event) => {
 
     for (const client of windows) {
       if (client.url.startsWith(scopeUrl)) {
+        // 先に postMessage する。focus() より前に届けておくと、画面が前に出た時点で
+        // もう目的の画面になっている（切り替わりが見えない）。
+        client.postMessage({ type: "notification-click", data });
+        // navigate は同一オリジンなら使える。使えない環境（iOS）でも postMessage 側で
+        // ルーティングされるので、失敗は握りつぶしてよい。
+        try {
+          await client.navigate?.(targetUrl);
+        } catch {
+          /* 失敗しても postMessage 側で着地する */
+        }
         await client.focus();
-        // アプリ側に「通知から来た」ことを伝える（将来の画面遷移用）。
-        client.postMessage({ type: "notification-click", data: event.notification.data });
         return;
       }
     }
-    await self.clients.openWindow(scopeUrl);
+    await self.clients.openWindow(targetUrl);
   })());
 });
 

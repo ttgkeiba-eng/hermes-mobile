@@ -1,31 +1,61 @@
 # Hermes Mobile
 
-Hermes の日次スクリーニング結果を **Web Push** で受け取る最小 PWA。
+Hermes の日次スクリーニング結果を見る・**Web Push** で受け取る最小 PWA。
 サーバ側（Supabase スキーマ / Edge Function `send-push`）は
 [hermes-project](https://github.com/) の `supabase/` 配下にある。
 
-このアプリがやることは 3 つだけ:
+このアプリがやること:
 
 1. Supabase にログインする（単一ユーザー / Email + パスワード）
 2. Service Worker を登録して Push を購読する
 3. 購読（`endpoint` / `p256dh` / `auth`）を `push_subscriptions` に upsert する
+4. スクリーニング結果を読んで表示する（Phase D / **読み取りのみ**）
 
 あとは 18:00 のバッチが `notifications` に行を入れると、Edge Function が
-この購読へ暗号化した本文を送り、Service Worker が通知を出す。
+この購読へ暗号化した本文を送り、Service Worker が通知を出す。通知をタップすると
+ホーム画面（その日の 1 位）に着地する。
 
 ## 構成
 
 ```text
 hermes-mobile/
-├── index.html              画面（ログイン / 通知の有効化）
-├── app.js                  本体。fetch で GoTrue と PostgREST を直接叩く
+├── index.html              画面の器（ログイン / ホーム / 全銘柄 / 詳細 / 設定）
+├── app.js                  本体。ルーティングと Push の有効化
+├── session.js              セッションと PostgREST 呼び出し
+├── dashboard.js            ダッシュボードの取得と描画（読み取りのみ）
 ├── config.js               接続設定（すべて公開値）
 ├── sw.js                   Service Worker（push / notificationclick）
-├── styles.css              ダークテーマ
+├── styles.css              ダークテーマ（ゴールド系）
 ├── manifest.webmanifest    PWA マニフェスト（standalone）
 ├── icons/                  アイコン（生成物）
 └── tools/generate_icons.py アイコン生成（依存ゼロ）
 ```
+
+### 画面（Phase D）
+
+ハッシュだけでルーティングする。GitHub Pages は静的配信なので、パスで分けると
+リロード時に 404 になる（`/all` という実ファイルは無い）。ハッシュなら常に
+`index.html` が返り、端末の「戻る」もそのまま効く。
+
+| ルート | 画面 | 中身 |
+| --- | --- | --- |
+| `#/` | ホーム | 1 位のヒーローカード / 2・3 位 / 全 N 銘柄への導線 / ウォッチリストの変動 |
+| `#/all` | 全銘柄 | 最新 `run_date` を `rank` 昇順で全件 |
+| `#/s/<code>` | 銘柄詳細 | スコア推移（直近 10 回）と `scoring_breakdown` の内訳 |
+| `#/settings` | 設定 | アカウント / 通知の有効化・解除（Phase B の画面） |
+
+読むテーブルは `screening_results` / `scoring_breakdown` / `watchlist` の 3 つで、
+**すべてログイン中のユーザーの JWT（`authenticated`）経由**。`anon` キーは `apikey`
+ヘッダにしか使っておらず、`service_role` はアプリに存在しない。書き込みは
+`push_subscriptions` の upsert / delete だけで、Phase B から増えていない。
+
+**前回比**は「最新 `run_date`」と「その 1 つ前の `run_date`」の `total_score` の差。
+`screening_results` は上位 N 銘柄しか持たないので、ウォッチ銘柄がそこに居ない場合は
+0 点扱いにせず **「圏外」** と表示する。
+
+**内訳の可視化はキー名を決め打ちしない。** 「値がオブジェクトのものはグループ」
+「その中の数値が項目」「`subtotal` があれば小計」という構造だけを仮定しているので、
+バッチ側が項目を足しても画面は壊れない（日本語ラベルの辞書に無いキーはそのまま出る）。
 
 **ビルド工程は無い。** npm も node_modules も不要で、リポジトリの中身がそのまま
 配信物になる。GitHub Pages へは push するだけ。
@@ -173,4 +203,23 @@ python3 tools/generate_icons.py
 `tools/generate_icons.py` の `BG` / `FG` を変えて再実行すれば `icons/` が作り直される。
 Pillow も ImageMagick も要らない（zlib で PNG を直接書いている）。
 色を変えたら `manifest.webmanifest` の `theme_color` / `background_color` と
-`styles.css` の `--bg` / `--accent` も揃えること。
+`styles.css` の `--bg` / `--gold` も揃えること。
+
+## 配色
+
+ダーク固定のゴールド系。彩度の高い面は 1 位のヒーローだけに使い、他は無彩色に寄せている。
+
+| 用途 | 変数 | 値 |
+| --- | --- | --- |
+| 背景 | `--bg` | `#0B0D14` |
+| カード | `--surface` | `#14161F`（上下でごく僅かな明度差を付けたグラデ） |
+| ヒーロー枠 | `--gold-line` | `#C9A24B` |
+| ボーダー | `--border` | `#262A34` |
+| 文字 | `--text` | `#F2EEE6` |
+| 副文字 | `--muted` | `#98917F` |
+| アクセント | `--gold` | `#E6C97E` |
+| 上昇 | `--up` | `#6FC59A` |
+| 下落 | `--down` | `#E08A8A` |
+
+数字はすべて等幅（`--mono` / `tabular-nums`）。1 位のスコアだけ `text-shadow` で
+淡く発光させている。

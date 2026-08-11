@@ -1,31 +1,42 @@
 // Hermes Mobile / アプリ本体
 //
-// やることは 3 つだけ:
-//   1. Supabase にログインしてアクセストークンを持つ
+// やること:
+//   1. Supabase にログインしてアクセストークンを持つ（session.js）
 //   2. Service Worker を登録して Push を購読する
 //   3. 購読(endpoint/p256dh/auth)を push_subscriptions に upsert する
+//   4. ダッシュボードを出す（dashboard.js / Phase D で追加）
 //
 // 依存ゼロ。supabase-js も使わず fetch で GoTrue と PostgREST を直接叩く。
 // hermes-project 側（supabase_sync.py の urllib、send-push の fetch）と同じ作法で、
 // ビルド工程が無いぶん GitHub Pages へは push するだけで配れる。
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY, VAPID_PUBLIC_KEY } from "./config.js";
-
-const SESSION_KEY = "hermes.session";
+import { VAPID_PUBLIC_KEY } from "./config.js";
+import {
+  ensureFreshToken,
+  getSession,
+  loadSession,
+  rest,
+  setSignedOutHandler,
+  signIn,
+  signOut,
+} from "./session.js";
+import { loadDetail, loadOverview, renderAll, renderDetail, renderHome } from "./dashboard.js";
 
 // ── DOM ─────────────────────────────────────────────────────────────────────
 
 const $ = (id) => document.getElementById(id);
-const loginCard = $("login-card");
-const mainCard = $("main-card");
 const statusLine = $("status");
 const hintLine = $("hint");
 const pushState = $("push-state");
 const enableButton = $("enable-button");
 const testButton = $("test-button");
 const disableButton = $("disable-button");
+const settingsButton = $("settings-button");
 
-let session = null;
+const VIEWS = ["login", "home", "all", "detail", "settings"];
+
+// 取得済みの一覧。全銘柄・詳細から使い回すのでここに持つ（再取得を避ける）。
+let overview = null;
 
 // ── 表示 ────────────────────────────────────────────────────────────────────
 
@@ -38,125 +49,43 @@ function setBusy(busy) {
   for (const el of document.querySelectorAll("button")) el.disabled = busy;
 }
 
-// ── セッション ──────────────────────────────────────────────────────────────
-
-function loadSession() {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+function showView(name) {
+  for (const view of VIEWS) $(`view-${view}`).hidden = view !== name;
+  settingsButton.hidden = name === "login";
+  window.scrollTo(0, 0);
 }
 
-function saveSession(value) {
-  session = value;
-  if (value) localStorage.setItem(SESSION_KEY, JSON.stringify(value));
-  else localStorage.removeItem(SESSION_KEY);
-}
-
-async function authFetch(path, body) {
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
-    method: "POST",
-    headers: { apikey: SUPABASE_ANON_KEY, "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error_description || payload.msg || payload.error || `HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-function storeToken(payload) {
-  saveSession({
-    access_token: payload.access_token,
-    refresh_token: payload.refresh_token,
-    // expires_in は「発行からの秒数」。実時刻に直して保存する。
-    expires_at: Date.now() + (payload.expires_in ?? 3600) * 1000,
-    email: payload.user?.email ?? "",
-  });
-}
-
-async function signIn(email, password) {
-  storeToken(await authFetch("token?grant_type=password", { email, password }));
-}
-
-/**
- * 期限が近ければリフレッシュする。
- * PWA は何日も開きっぱなしになるので、操作のたびに軽く見ておく。
- */
-async function ensureFreshToken() {
-  if (!session) return null;
-  if (session.expires_at - Date.now() > 60_000) return session.access_token;
-  try {
-    storeToken(await authFetch("token?grant_type=refresh_token", { refresh_token: session.refresh_token }));
-    return session.access_token;
-  } catch {
-    // リフレッシュトークンごと失効している。作り直しはできないので再ログイン。
-    saveSession(null);
-    render();
-    say("セッションが切れました。もう一度ログインしてください。", "warn");
-    return null;
-  }
-}
-
-// ── PostgREST ───────────────────────────────────────────────────────────────
+// ── Push ────────────────────────────────────────────────────────────────────
 
 /**
  * 購読を push_subscriptions に upsert する。
  * endpoint が UNIQUE なので、同じ端末で再購読しても行は増えない。
  */
 async function upsertSubscription(subscription) {
-  const token = await ensureFreshToken();
-  if (!token) throw new Error("ログインが必要です");
-
   const json = subscription.toJSON();
   if (!json.keys?.p256dh || !json.keys?.auth) {
     throw new Error("購読に暗号鍵が含まれていません（このブラウザでは配信できません）");
   }
 
-  const response = await fetch(
-    `${SUPABASE_URL}/rest/v1/push_subscriptions?on_conflict=endpoint`,
-    {
-      method: "POST",
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-        // merge-duplicates = endpoint が既にあれば UPDATE。updated_at は DB のトリガが進める。
-        prefer: "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify({
-        endpoint: json.endpoint,
-        p256dh: json.keys.p256dh,
-        auth: json.keys.auth,
-        platform: "web",
-      }),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`購読の保存に失敗: HTTP ${response.status} ${await response.text()}`);
-  }
+  await rest("push_subscriptions?on_conflict=endpoint", {
+    method: "POST",
+    // merge-duplicates = endpoint が既にあれば UPDATE。updated_at は DB のトリガが進める。
+    headers: { prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+      platform: "web",
+    }),
+  });
 }
 
 async function deleteSubscription(endpoint) {
-  const token = await ensureFreshToken();
-  if (!token) return;
-  await fetch(
-    `${SUPABASE_URL}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`,
-    {
-      method: "DELETE",
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        authorization: `Bearer ${token}`,
-        prefer: "return=minimal",
-      },
-    },
-  );
+  await rest(`push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`, {
+    method: "DELETE",
+    headers: { prefer: "return=minimal" },
+  });
 }
-
-// ── Push ────────────────────────────────────────────────────────────────────
 
 /**
  * base64url の VAPID 公開鍵を Uint8Array に変換する。
@@ -224,8 +153,6 @@ async function disablePush() {
   await subscription.unsubscribe();
 }
 
-// ── 画面の出し分け ──────────────────────────────────────────────────────────
-
 async function refreshPushState() {
   if (!pushSupported()) {
     pushState.textContent = "非対応";
@@ -260,13 +187,93 @@ async function refreshPushState() {
   }
 }
 
-async function render() {
-  const signedIn = Boolean(session);
-  loginCard.hidden = signedIn;
-  mainCard.hidden = !signedIn;
-  if (signedIn) {
-    $("user-email").textContent = session.email || "(不明)";
+// ── ルーティング ────────────────────────────────────────────────────────────
+//
+// ハッシュだけで切り替える。GitHub Pages は静的配信なので、パスで分けると
+// リロード時に 404 になる（/all という実ファイルは無い）。ハッシュなら常に
+// index.html が返り、戻る／進むも端末の標準操作がそのまま効く。
+//
+//   #/          ホーム
+//   #/all       全銘柄
+//   #/s/<code>  銘柄詳細
+//   #/settings  設定
+
+function parseRoute() {
+  const hash = location.hash.replace(/^#/, "");
+  const parts = hash.split("/").filter(Boolean);
+  if (!parts.length) return { name: "home" };
+  if (parts[0] === "all") return { name: "all" };
+  if (parts[0] === "settings") return { name: "settings" };
+  if (parts[0] === "s" && parts[1]) return { name: "detail", ticker: decodeURIComponent(parts[1]) };
+  return { name: "home" };
+}
+
+function goHome(replace = false) {
+  if (replace) history.replaceState(null, "", "#/");
+  else location.hash = "#/";
+}
+
+/** 一覧を持っていなければ取りに行く。失敗しても画面は残す（文字で理由を出す）。 */
+async function ensureOverview({ force = false } = {}) {
+  if (overview && !force) return overview;
+  overview = await loadOverview();
+  return overview;
+}
+
+async function route() {
+  if (!getSession()) {
+    showView("login");
+    return;
+  }
+
+  const target = parseRoute();
+
+  if (target.name === "settings") {
+    showView("settings");
+    $("user-email").textContent = getSession().email || "(不明)";
     await refreshPushState();
+    return;
+  }
+
+  if (target.name === "detail") {
+    showView("detail");
+    const body = $("detail-body");
+    body.textContent = "読み込み中…";
+    try {
+      const data = await ensureOverview();
+      const row = data.rows.find((r) => r.ticker === target.ticker)
+        || data.watch.find((r) => r.ticker === target.ticker);
+      const detail = await loadDetail(target.ticker, data.runDate);
+      renderDetail(body, detail, row);
+    } catch (error) {
+      body.textContent = "";
+      say(error.message, "bad");
+    }
+    return;
+  }
+
+  if (target.name === "all") {
+    showView("all");
+    const body = $("all-body");
+    body.textContent = "読み込み中…";
+    try {
+      renderAll(body, await ensureOverview());
+    } catch (error) {
+      body.textContent = "";
+      say(error.message, "bad");
+    }
+    return;
+  }
+
+  // ホーム
+  showView("home");
+  const home = $("view-home");
+  if (!overview) home.textContent = "読み込み中…";
+  try {
+    renderHome(home, await ensureOverview());
+  } catch (error) {
+    home.textContent = "";
+    say(error.message, "bad");
   }
 }
 
@@ -279,14 +286,29 @@ $("login-form").addEventListener("submit", async (event) => {
   try {
     await signIn($("email").value.trim(), $("password").value);
     $("password").value = "";
-    say("ログインしました", "ok");
-    await render();
+    say("");
+    overview = null;
+    goHome(true);
+    await route();
   } catch (error) {
     say(`ログインに失敗: ${error.message}`, "bad");
   } finally {
     setBusy(false);
   }
 });
+
+settingsButton.addEventListener("click", () => {
+  location.hash = "#/settings";
+});
+
+for (const button of document.querySelectorAll("[data-back]")) {
+  button.addEventListener("click", () => {
+    // 戻り先が自分のアプリ内なら履歴を1つ戻す（詳細 → 全銘柄 が自然につながる）。
+    // 通知や外部リンクから直接来た場合は履歴が無いのでホームへ落とす。
+    if (history.length > 1) history.back();
+    else goHome();
+  });
+}
 
 enableButton.addEventListener("click", async () => {
   setBusy(true);
@@ -333,32 +355,64 @@ disableButton.addEventListener("click", async () => {
 });
 
 $("logout-button").addEventListener("click", async () => {
-  // 購読は消さない。ログアウトしても同じ端末で再ログインすれば通知は続く。
-  saveSession(null);
+  signOut();
+  overview = null;
   say("ログアウトしました");
-  await render();
+  goHome(true);
+  await route();
 });
 
-// SW からの通知タップ通知を受ける（今は何もしないが、将来の画面遷移用の口）。
-navigator.serviceWorker?.addEventListener("message", (event) => {
-  if (event.data?.type === "notification-click") {
-    say(`通知から起動: ${event.data.data?.type ?? ""}`);
+window.addEventListener("hashchange", () => {
+  route();
+});
+
+// セッションが切れたら（リフレッシュ失敗 / 401）ログイン画面へ戻す。
+setSignedOutHandler(() => {
+  overview = null;
+  showView("login");
+  say("セッションが切れました。もう一度ログインしてください。", "warn");
+});
+
+// 通知タップで開かれた／前面化されたときの着地。batch_done はホームに落とす。
+navigator.serviceWorker?.addEventListener("message", async (event) => {
+  if (event.data?.type !== "notification-click") return;
+  const data = event.data.data || {};
+  // 通知は「その日のバッチが終わった」合図なので、必ず最新を取り直してから出す。
+  overview = null;
+  if (data.ticker) location.hash = `#/s/${encodeURIComponent(data.ticker)}`;
+  else if (location.hash && location.hash !== "#/") goHome();
+  else await route();
+});
+
+// PWA を再前面化したときに古い日付のまま残らないようにする。
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || !getSession()) return;
+  if (parseRoute().name !== "home") return;
+  try {
+    await ensureOverview({ force: true });
+    await route();
+  } catch {
+    /* 取れなければ表示中のものを残す */
   }
 });
 
 // ── 起動 ────────────────────────────────────────────────────────────────────
 
 (async function start() {
-  session = loadSession();
-  await render();
+  loadSession();
 
-  if (session) await ensureFreshToken();
+  if (getSession()) {
+    await ensureFreshToken();
+    // 通知から開かれた直後を除き、起動時はホームに揃える。
+    if (!location.hash) history.replaceState(null, "", "#/");
+  }
+
+  await route();
 
   // 既にログイン済み・許可済みなら SW を登録しておく（購読状態の表示に要る）。
   if (pushSupported() && Notification.permission === "granted") {
     try {
       await getRegistration();
-      await refreshPushState();
     } catch {
       /* 登録に失敗しても画面は出す */
     }

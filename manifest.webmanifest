@@ -1,7 +1,7 @@
 {
   "name": "Hermes — 日次スクリーニング",
   "short_name": "Hermes",
-  "description": "Hermes の日次スクリーニング結果を受け取る通知アプリ",
+  "description": "Hermes の日次スクリーニング結果を見る・通知で受け取るアプリ",
   "lang": "ja",
   "dir": "ltr",
   "start_url": "./",
@@ -9,8 +9,8 @@
   "id": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b1220",
-  "theme_color": "#0b1220",
+  "background_color": "#0B0D14",
+  "theme_color": "#0B0D14",
   "categories": ["finance", "productivity"],
   "icons": [
     {
