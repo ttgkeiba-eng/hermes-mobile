@@ -191,6 +191,10 @@ async function resolveWatchlist(watch, ranked, prevByTicker, runDate, prevDate) 
   });
 }
 
+// 銘柄詳細のスコア推移で遡る回数。30 営業日 ≒ 1 か月半で、季節性まで見なくても
+// 「今の水準がいつからか」は読める長さ。棒が細くなりすぎない上限でもある。
+const HISTORY_LIMIT = 30;
+
 /** 銘柄詳細。内訳（最新 run_date）とスコア推移をまとめて取る。 */
 export async function loadDetail(ticker, runDate) {
   const [breakdownRows, history] = await Promise.all([
@@ -200,7 +204,7 @@ export async function loadDetail(ticker, runDate) {
     ),
     select(
       `screening_results?select=run_date,rank,total_score&ticker=eq.${encodeURIComponent(ticker)}` +
-        `&order=run_date.desc&limit=10`,
+        `&order=run_date.desc&limit=${HISTORY_LIMIT}`,
     ),
   ]);
   return {
@@ -222,12 +226,13 @@ function deltaChip(delta) {
   return chip;
 }
 
-/** カード・行の共通クリック処理。タップで銘柄詳細へ。 */
-function linkTo(node, ticker) {
+/** カード・行の共通クリック処理。既定は銘柄詳細、hash を渡せばそちらへ。 */
+function linkTo(node, ticker, hash) {
   node.tabIndex = 0;
   node.setAttribute("role", "link");
+  const target = hash || `#/s/${encodeURIComponent(ticker)}`;
   const go = () => {
-    location.hash = `#/s/${ticker}`;
+    location.hash = target;
   };
   node.addEventListener("click", go);
   node.addEventListener("keydown", (e) => {
@@ -392,6 +397,16 @@ function breakdownGroup(key, value) {
   }
   group.append(head);
 
+  // このグループが何で動いているか。加点・減点・効いていない項目の数を先に出す。
+  const plus = entries.filter(([, v]) => num(v) > 0).length;
+  const minus = entries.filter(([, v]) => num(v) < 0).length;
+  const zero = entries.length - plus - minus;
+  const tally = el("p", "bd-tally");
+  tally.append(el("span", "tally pos", `加点 ${plus}`));
+  tally.append(el("span", "tally neg", `減点 ${minus}`));
+  tally.append(el("span", "tally zero", `無風 ${zero}`));
+  group.append(tally);
+
   for (const [k, v] of entries) {
     const n = num(v);
     const row = el("div", "bd-row");
@@ -428,20 +443,76 @@ function historyChart(history) {
   const span = Math.max(observed, SPARK_MIN_SPAN);
   const base = min - (span - observed) / 2; // 実測レンジを目盛りの中央に置く
 
+  // 30 本ぶん日付を書くと潰れて読めない。端と一定間隔だけ残す。
+  const step = Math.max(1, Math.ceil(history.length / 6));
+  const lastIndex = history.length - 1;
+
   const chart = el("div", "spark");
-  for (const point of history) {
+  if (history.length > 14) chart.classList.add("dense");
+  history.forEach((point, index) => {
     const n = num(point.total_score);
     const col = el("div", "spark-col");
     const bar = el("div", "spark-bar");
     // 下端でも 12% 残す。高さゼロの棒は「データが無い」ように見えてしまうため。
     bar.style.height = `${12 + ((n - base) / span) * 88}%`;
-    if (point === history[history.length - 1]) bar.classList.add("latest");
+    if (index === lastIndex) bar.classList.add("latest");
     col.append(bar);
-    col.append(el("span", "spark-label", point.run_date.slice(5).replace("-", "/")));
+    const label = index === lastIndex || index % step === 0
+      ? point.run_date.slice(5).replace("-", "/")
+      : "";
+    col.append(el("span", "spark-label", label));
     col.title = `${fmtDate(point.run_date)}  ${fmtScore(n)}点  ${point.rank}位`;
     chart.append(col);
-  }
+  });
   return { chart, min, max };
+}
+
+/**
+ * グループ小計の構成バー。総合スコアが何でできているかを 1 本で見せる。
+ *
+ * どのグループがあるかは JSON から拾う（base/technical/fundamental を決め打ちしない）。
+ * 幅は絶対値の比。減点グループは分けて下に出す — 加点と同じ帯に混ぜると
+ * 「合計に占める割合」を誤って読ませてしまうため。
+ */
+function compositionBar(groups) {
+  const scored = groups
+    .map(([key, value]) => [key, num(value.subtotal)])
+    .filter(([, v]) => Number.isFinite(v) && v !== 0);
+  if (scored.length < 2) return null;
+
+  const positives = scored.filter(([, v]) => v > 0);
+  const negatives = scored.filter(([, v]) => v < 0);
+  const totalAbs = positives.reduce((sum, [, v]) => sum + v, 0);
+  if (!totalAbs) return null;
+
+  const wrap = el("div", "comp");
+  const track = el("div", "comp-track");
+  positives.forEach(([key, value], index) => {
+    const seg = el("div", `comp-seg tone-${index % 3}`);
+    seg.style.width = `${(value / totalAbs) * 100}%`;
+    seg.title = `${GROUP_LABELS[key] || key} ${fmtScore(value)}点`;
+    track.append(seg);
+  });
+  wrap.append(track);
+
+  const legend = el("div", "comp-legend");
+  positives.forEach(([key, value], index) => {
+    const item = el("span", "comp-item");
+    item.append(el("i", `comp-dot tone-${index % 3}`));
+    item.append(el("span", null, GROUP_LABELS[key] || key));
+    item.append(el("span", "comp-value mono", `${fmtScore(value)}`));
+    item.append(el("span", "comp-share", `${Math.round((value / totalAbs) * 100)}%`));
+    legend.append(item);
+  });
+  for (const [key, value] of negatives) {
+    const item = el("span", "comp-item");
+    item.append(el("i", "comp-dot neg"));
+    item.append(el("span", null, GROUP_LABELS[key] || key));
+    item.append(el("span", "comp-value mono neg", fmtScore(value)));
+    legend.append(item);
+  }
+  wrap.append(legend);
+  return wrap;
 }
 
 export function renderDetail(root, detail, overviewRow) {
@@ -497,11 +568,24 @@ export function renderDetail(root, detail, overviewRow) {
   if (!b) {
     root.append(el("p", "empty", "この銘柄の内訳データはまだありません。"));
   } else {
+    const groups = Object.entries(b).filter(
+      ([, value]) => value && typeof value === "object" && !Array.isArray(value),
+    );
+
+    // まず「何でできているか」を 1 本のバーで。次にグループごとの深掘り。
+    const composition = compositionBar(groups);
+    if (composition) {
+      const block = el("section", "block");
+      block.append(el("h2", null, "スコアの構成"));
+      block.append(composition);
+      block.append(el("p", "note", "各グループの小計が総合スコアに占める割合です。"));
+      root.append(block);
+    }
+
     const block = el("section", "block");
-    block.append(el("h2", null, "スコア内訳"));
+    block.append(el("h2", null, "指標グループ別の内訳"));
     let drawn = 0;
-    for (const [key, value] of Object.entries(b)) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    for (const [key, value] of groups) {
       const group = breakdownGroup(key, value);
       if (group) {
         block.append(group);

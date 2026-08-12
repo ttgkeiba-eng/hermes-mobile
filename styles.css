@@ -329,6 +329,37 @@ h1 { margin: 0; font-size: 20px; letter-spacing: .04em; }
 .bd-value.pos { color: var(--text); }
 .bd-value.neg { color: var(--down); }
 
+/* ── スコアの構成（グループ小計の帯）── */
+.comp { display: flex; flex-direction: column; gap: 10px; }
+
+.comp-track {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, .04);
+}
+.comp-seg { height: 100%; }
+/* 金を基準に明度だけ落とした 3 段。色相を増やすと「意味の違う色」に見えるため */
+.comp-seg.tone-0, .comp-dot.tone-0 { background: var(--gold); }
+.comp-seg.tone-1, .comp-dot.tone-1 { background: var(--gold-line); }
+.comp-seg.tone-2, .comp-dot.tone-2 { background: #8A7440; }
+.comp-dot.neg { background: var(--down); }
+
+.comp-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.comp-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.comp-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.comp-value { color: var(--text); font-size: 12.5px; }
+.comp-value.neg { color: var(--down); }
+.comp-share { color: var(--muted); font-size: 11px; }
+
+/* グループ内の加点/減点の内訳 */
+.bd-tally { display: flex; gap: 10px; margin: 0 0 8px; font-size: 11.5px; }
+.tally { color: var(--muted); }
+.tally.pos { color: var(--gold); }
+.tally.neg { color: var(--down); }
+
 /* ── スコア推移 ── */
 .spark {
   display: flex;
@@ -358,6 +389,11 @@ h1 { margin: 0; font-size: 20px; letter-spacing: .04em; }
   padding: 4px 0 6px;
   white-space: nowrap;
 }
+
+/* 30 本並ぶときは棒を細く、隙間も詰める。ラベルは dashboard.js が間引く */
+.spark.dense { gap: 2px; }
+.spark.dense .spark-bar { border-radius: 2px 2px 0 0; }
+.spark.dense .spark-label { font-size: 8px; }
 
 /* ── フォーム（ログイン / 設定）── */
 label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
