@@ -23,7 +23,8 @@ hermes-mobile/
 ├── app.js                  本体。ルーティングと Push の有効化
 ├── session.js              セッションと PostgREST 呼び出し
 ├── dashboard.js            ダッシュボードの取得と描画（読み取りのみ）
-├── markdown.js             note 記事用の最小 Markdown レンダラ
+├── chat.js                 アプリ内チャット（Edge Function chat を呼ぶ）
+├── markdown.js             note 記事・チャット用の最小 Markdown レンダラ
 ├── config.js               接続設定（すべて公開値）
 ├── sw.js                   Service Worker（push / notificationclick）
 ├── styles.css              ダークテーマ（ゴールド系）
@@ -45,6 +46,7 @@ hermes-mobile/
 | `#/s/<code>` | 銘柄詳細 | スコア推移（直近 30 回）と `scoring_breakdown` のグループ別内訳 |
 | `#/article` | 記事 | その日の note 記事（`#/article/<YYYY-MM-DD>` で過去分） |
 | `#/weekly` | 週次 | `diff_reports` の今週のスコア変動 |
+| `#/chat` | チャット | Hermes に質問する（`#/chat/<code>` で銘柄を添える） |
 | `#/settings` | 設定 | アカウント / 通知の有効化・解除（Phase B の画面） |
 
 読むテーブルは `screening_results` / `scoring_breakdown` / `watchlist` /
@@ -65,6 +67,23 @@ hermes-mobile/
 - Markdown は `markdown.js` が **DOM を直接組み立てて**描画する。`innerHTML` は使わない。
 - 記事中の画像は vault の相対パス（`charts/*.png`）。PNG は Pages にも Supabase にも
   無いので `img` は出さず、「図があった」ことだけをキャプションで残す。
+
+### チャットについて（Phase C）
+
+質問は Supabase の Edge Function `chat` に投げる。**モデルもツールもサーバ側**にあり、
+アプリは自分のアクセストークンで関数を呼ぶだけ。
+
+- `ANTHROPIC_API_KEY` は **Supabase Secrets にしか無い**。`config.js` には置かない
+  （置いた瞬間に GitHub Pages で誰でも読める＝課金が公開される）。
+- 関数は呼び出し元を GoTrue で検証するので、`config.js` の publishable キーだけでは
+  401 になる。ログインしていないと会話できない。
+- 過去ログは `chat_messages` から `authenticated` の RLS 経由で読む。
+- **モデルの出力を `innerHTML` に流さない。** `markdown.js`（DOM を直接組み立てる
+  自前のレンダラ）に通す。出所がモデルである以上、文字列を組み立てて `innerHTML`
+  する形にするとそこが注入経路になる。
+
+サーバ側の仕様（ツール一覧・ガード・デプロイ手順）は hermes-project の
+`supabase/README.md` の「Phase C」節を見ること。
 
 **内訳の可視化はキー名を決め打ちしない。** 「値がオブジェクトのものはグループ」
 「その中の数値が項目」「`subtotal` があれば小計」という構造だけを仮定しているので、

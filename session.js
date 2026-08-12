@@ -128,3 +128,38 @@ export async function rest(path, options = {}) {
 export function select(query) {
   return rest(query, { method: "GET" });
 }
+
+// ── Edge Functions ──────────────────────────────────────────────────────────
+
+/**
+ * Edge Function を **ログイン中のユーザーの JWT** で叩く（Phase C の chat）。
+ *
+ * anon キーを apikey ヘッダに乗せない。chat 側は GET /auth/v1/user で実ユーザーを
+ * 確認しており、公開キーだけでは 401 を返す。ここで anon キーを足すと、その意図が
+ * 分かりにくくなるだけで通りやすくもならない。
+ */
+export async function callFunction(name, body) {
+  const token = await ensureFreshToken();
+  if (!token) throw new Error("ログインが必要です");
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (response.status === 401) {
+    saveSession(null);
+    onSignedOut();
+    throw new Error("セッションが切れました。もう一度ログインしてください。");
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}

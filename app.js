@@ -32,6 +32,7 @@ import {
   renderHome,
   renderWeekly,
 } from "./dashboard.js";
+import { loadBacklog, renderChat } from "./chat.js";
 
 // ── DOM ─────────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ const testButton = $("test-button");
 const disableButton = $("disable-button");
 const settingsButton = $("settings-button");
 
-const VIEWS = ["login", "home", "all", "detail", "article", "weekly", "settings"];
+const VIEWS = ["login", "home", "all", "detail", "article", "weekly", "chat", "settings"];
 
 // 取得済みの一覧。全銘柄・詳細から使い回すのでここに持つ（再取得を避ける）。
 let overview = null;
@@ -210,6 +211,8 @@ async function refreshPushState() {
 //   #/article       最新の note 記事
 //   #/article/<日付> 指定日の note 記事（YYYY-MM-DD）
 //   #/weekly        週次 diff レポート
+//   #/chat          アプリ内チャット
+//   #/chat/<code>   銘柄を添えたチャット（銘柄詳細から）
 //   #/settings      設定
 
 function parseRoute() {
@@ -218,6 +221,7 @@ function parseRoute() {
   if (!parts.length) return { name: "home" };
   if (parts[0] === "all") return { name: "all" };
   if (parts[0] === "weekly") return { name: "weekly" };
+  if (parts[0] === "chat") return { name: "chat", ticker: parts[1] ? decodeURIComponent(parts[1]) : null };
   if (parts[0] === "settings") return { name: "settings" };
   if (parts[0] === "article") return { name: "article", runDate: parts[1] || null };
   if (parts[0] === "s" && parts[1]) return { name: "detail", ticker: decodeURIComponent(parts[1]) };
@@ -292,6 +296,22 @@ async function route() {
         loadArticleIndex().catch(() => []),
       ]);
       renderArticle(body, article, index);
+    } catch (error) {
+      body.textContent = "";
+      say(error.message, "bad");
+    }
+    return;
+  }
+
+  if (target.name === "chat") {
+    showView("chat");
+    const body = $("chat-body");
+    body.textContent = "読み込み中…";
+    try {
+      // 過去ログの取得に失敗しても会話は始められる。ここで止めない。
+      await loadBacklog().catch((error) => say(`過去ログを読めません: ${error.message}`, "warn"));
+      const data = overview ? overview : await ensureOverview().catch(() => null);
+      renderChat(body, target.ticker, data?.runDate ?? null);
     } catch (error) {
       body.textContent = "";
       say(error.message, "bad");

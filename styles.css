@@ -553,6 +553,90 @@ h1 { margin: 0; font-size: 20px; letter-spacing: .04em; }
 .diff-scores { font-size: 12.5px; color: var(--muted); }
 .diff-to { color: var(--text); }
 
+/* ── チャット ── */
+.chat-log { display: flex; flex-direction: column; gap: 10px; }
+
+.bubble-row { display: flex; }
+.bubble-row.user { justify-content: flex-end; }
+.bubble-row.assistant { justify-content: flex-start; }
+
+.bubble {
+  max-width: 88%;
+  padding: 11px 14px;
+  border-radius: 14px;
+  font-size: 14.5px;
+  line-height: 1.75;
+}
+/* 自分の発言だけ金の面。相手（＝機械）の発言は無彩色に置き、
+   どちらが誰かを色で1目で分けられるようにする */
+.bubble.user {
+  background: linear-gradient(160deg, var(--gold), var(--gold-line));
+  color: #14100A;
+  border-bottom-right-radius: 4px;
+}
+.bubble.assistant {
+  background: linear-gradient(180deg, var(--surface-top), var(--surface-bottom));
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+/* 入力そのままを出す側。改行を保ち、勝手に整形しない */
+.bubble.plain { white-space: pre-wrap; word-break: break-word; }
+
+.bubble.thinking { color: var(--muted); font-style: normal; }
+/* 「考え中…」は動きで待たせる。動きを減らす設定なら止める */
+.bubble.thinking::after {
+  content: "";
+  display: inline-block;
+  width: 5px; height: 5px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: chat-pulse 1s ease-in-out infinite;
+}
+@keyframes chat-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+/* 吹き出しの中の Markdown は本文より詰める（記事画面ほど間を取らない） */
+.bubble .md-p { margin: 8px 0; }
+.bubble .md-p:first-child { margin-top: 0; }
+.bubble .md-p:last-child { margin-bottom: 0; }
+.bubble .md-list { margin: 8px 0; }
+.bubble .md-h1, .bubble .md-h2, .bubble .md-h3 {
+  margin: 12px 0 6px;
+  font-size: 14.5px;
+  border: none;
+  padding: 0;
+  color: var(--gold);
+}
+
+.chat-error { margin: 0; font-size: 13px; color: var(--down); }
+
+.chat-form { display: flex; gap: 8px; }
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  /* 16px 未満だと iOS Safari がフォーカス時に画面を拡大する */
+  font-size: 16px;
+}
+.chat-input:focus { outline: 2px solid var(--gold-line); outline-offset: 1px; }
+
+.chat-send {
+  flex: none;
+  background: linear-gradient(160deg, var(--gold), var(--gold-line));
+  color: #14100A;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 12px 20px;
+  min-height: 48px;
+}
+
+/* 銘柄詳細からチャットへ */
+.wide.ask { color: var(--gold); border-color: rgba(201, 162, 75, .45); }
+
 /* ── フォーム（ログイン / 設定）── */
 label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
 
@@ -648,4 +732,6 @@ button:disabled { opacity: .5; cursor: default; }
 /* 端末が「視差効果を減らす」設定なら発光やぼかしを抑える */
 @media (prefers-reduced-motion: reduce) {
   .hero-number, .detail-total-number, .spark-bar.latest { text-shadow: none; box-shadow: none; }
+  /* 待機中の点滅も止める。代わりに常時点灯させ、「待っている」ことは残す */
+  .bubble.thinking::after { animation: none; opacity: 1; }
 }

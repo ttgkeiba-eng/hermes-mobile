@@ -598,6 +598,15 @@ export function renderDetail(root, detail, overviewRow) {
     root.append(el("p", "note", `内訳は ${fmtDate(detail.breakdownDate)} 時点のものです。`));
   }
 
+  // チャットへの導線。スコアの数字より下、内訳より上に置く
+  // （「この数字は何？」と思った直後に押せる位置）。
+  const ask = el("button", "wide ask", "この銘柄について聞く");
+  ask.type = "button";
+  ask.addEventListener("click", () => {
+    location.hash = `#/chat/${encodeURIComponent(detail.ticker)}`;
+  });
+  root.append(ask);
+
   // 推移
   const spark = historyChart(detail.history);
   if (spark) {
