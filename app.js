@@ -24,11 +24,13 @@ import {
   loadArticle,
   loadArticleIndex,
   loadDetail,
+  loadDiffReport,
   loadOverview,
   renderAll,
   renderArticle,
   renderDetail,
   renderHome,
+  renderWeekly,
 } from "./dashboard.js";
 
 // ── DOM ─────────────────────────────────────────────────────────────────────
@@ -42,7 +44,7 @@ const testButton = $("test-button");
 const disableButton = $("disable-button");
 const settingsButton = $("settings-button");
 
-const VIEWS = ["login", "home", "all", "detail", "article", "settings"];
+const VIEWS = ["login", "home", "all", "detail", "article", "weekly", "settings"];
 
 // 取得済みの一覧。全銘柄・詳細から使い回すのでここに持つ（再取得を避ける）。
 let overview = null;
@@ -207,6 +209,7 @@ async function refreshPushState() {
 //   #/s/<code>      銘柄詳細
 //   #/article       最新の note 記事
 //   #/article/<日付> 指定日の note 記事（YYYY-MM-DD）
+//   #/weekly        週次 diff レポート
 //   #/settings      設定
 
 function parseRoute() {
@@ -214,6 +217,7 @@ function parseRoute() {
   const parts = hash.split("/").filter(Boolean);
   if (!parts.length) return { name: "home" };
   if (parts[0] === "all") return { name: "all" };
+  if (parts[0] === "weekly") return { name: "weekly" };
   if (parts[0] === "settings") return { name: "settings" };
   if (parts[0] === "article") return { name: "article", runDate: parts[1] || null };
   if (parts[0] === "s" && parts[1]) return { name: "detail", ticker: decodeURIComponent(parts[1]) };
@@ -288,6 +292,19 @@ async function route() {
         loadArticleIndex().catch(() => []),
       ]);
       renderArticle(body, article, index);
+    } catch (error) {
+      body.textContent = "";
+      say(error.message, "bad");
+    }
+    return;
+  }
+
+  if (target.name === "weekly") {
+    showView("weekly");
+    const body = $("weekly-body");
+    body.textContent = "読み込み中…";
+    try {
+      renderWeekly(body, await loadDiffReport());
     } catch (error) {
       body.textContent = "";
       say(error.message, "bad");

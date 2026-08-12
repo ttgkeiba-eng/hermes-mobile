@@ -237,6 +237,14 @@ export function loadArticleIndex(limit = 14) {
   return select(`daily_articles?select=run_date,title&order=run_date.desc&limit=${limit}`);
 }
 
+/** 週次 diff レポート。最新 1 件。 */
+export async function loadDiffReport() {
+  const rows = await select(
+    "diff_reports?select=report_date,summary,payload&order=report_date.desc&limit=1",
+  );
+  return rows.length ? rows[0] : null;
+}
+
 // ── 部品 ────────────────────────────────────────────────────────────────────
 
 function deltaChip(delta) {
@@ -369,7 +377,10 @@ export function renderHome(root, data) {
 
   // レポートへの導線。銘柄の並びより下、ウォッチリストより上に置く。
   const links = el("div", "nav-cards");
-  links.append(navCard("本日のレポートを読む", "note 記事をそのまま", "#/article"));
+  links.append(
+    navCard("本日のレポートを読む", "note 記事をそのまま", "#/article"),
+    navCard("今週のスコア変動", "週次 diff レポート", "#/weekly"),
+  );
   root.append(links);
 
   // ── ウォッチリストの変動 ──
@@ -688,4 +699,97 @@ export function renderArticle(root, article, index) {
     block.append(list);
     root.append(block);
   }
+}
+
+// ── 週次 diff レポート ──────────────────────────────────────────────────────
+
+function diffRow(stock) {
+  const line = el("div", "srow");
+  const label = el("div", "srow-label");
+  label.append(el("span", "ticker", stock.code));
+  label.append(el("span", "name", stock.name || ""));
+  line.append(label);
+
+  const right = el("div", "srow-right");
+  const scores = el("span", "diff-scores mono");
+  scores.append(el("span", "diff-from", fmtScore(stock.first_total)));
+  scores.append(el("span", "diff-to", ` → ${fmtScore(stock.last_total)}`));
+  right.append(scores);
+  right.append(deltaChip(stock.delta));
+  line.append(right);
+
+  return linkTo(line, stock.code);
+}
+
+export function renderWeekly(root, report) {
+  root.textContent = "";
+
+  if (!report || !report.payload) {
+    root.append(
+      el("p", "empty", "週次レポートがまだありません。毎週金曜 19:00 の集計後に表示されます。"),
+    );
+    return;
+  }
+
+  const p = report.payload;
+  const head = el("div", "section-head");
+  head.append(el("span", "run-date", `${fmtDate(report.report_date)} 集計`));
+  head.append(el("span", "run-count", `${p.days ?? "—"} 営業日`));
+  root.append(head);
+
+  if (p.period_start && p.period_end) {
+    root.append(el("p", "note", `対象期間 ${p.period_start} 〜 ${p.period_end}`));
+  }
+
+  // 件数の内訳。数字が主役なので大きめに出す。
+  const tiles = el("div", "tiles");
+  tiles.append(tile("上昇", p.risers, "up"));
+  tiles.append(tile("下降", p.fallers, "down"));
+  tiles.append(tile("変化なし", p.flat, "flat"));
+  root.append(tiles);
+
+  if (report.summary) {
+    const summary = el("section", "summary-card");
+    summary.append(el("h2", null, "サマリー"));
+    summary.append(el("p", null, report.summary));
+    root.append(summary);
+  }
+
+  const stocks = Array.isArray(p.stocks) ? p.stocks : [];
+  const risers = stocks.filter((s) => num(s.delta) > 0);
+  const fallers = stocks.filter((s) => num(s.delta) < 0).reverse();
+  const others = stocks.filter((s) => !(num(s.delta) > 0) && !(num(s.delta) < 0));
+
+  for (const [title, rows, note] of [
+    ["上昇した銘柄", risers, "期間の初日と最終日のスコア差です。"],
+    ["下降した銘柄", fallers, null],
+    ["変化のなかった銘柄", others, null],
+  ]) {
+    const block = el("section", "block");
+    block.append(el("h2", null, `${title}（${rows.length}）`));
+    if (rows.length) {
+      const list = el("div", "rows");
+      for (const stock of rows) list.append(diffRow(stock));
+      block.append(list);
+    } else {
+      block.append(el("p", "empty", "該当なし"));
+    }
+    if (note) block.append(el("p", "note", note));
+    root.append(block);
+  }
+
+  root.append(
+    el(
+      "p",
+      "disclaimer",
+      "期間中のスコアの動きを並べたものです。値動きの予測ではなく、売買の推奨でもありません。",
+    ),
+  );
+}
+
+function tile(label, value, kind) {
+  const box = el("div", `tile ${kind}`);
+  box.append(el("span", "tile-value mono", Number.isFinite(num(value)) ? String(value) : "—"));
+  box.append(el("span", "tile-label", label));
+  return box;
 }
