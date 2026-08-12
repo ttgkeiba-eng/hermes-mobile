@@ -19,10 +19,11 @@ Hermes の日次スクリーニング結果を見る・**Web Push** で受け取
 
 ```text
 hermes-mobile/
-├── index.html              画面の器（ログイン / ホーム / 全銘柄 / 詳細 / 設定）
+├── index.html              画面の器（ログイン / ホーム / 全銘柄 / 詳細 / 記事 / 週次 / 設定）
 ├── app.js                  本体。ルーティングと Push の有効化
 ├── session.js              セッションと PostgREST 呼び出し
 ├── dashboard.js            ダッシュボードの取得と描画（読み取りのみ）
+├── markdown.js             note 記事用の最小 Markdown レンダラ
 ├── config.js               接続設定（すべて公開値）
 ├── sw.js                   Service Worker（push / notificationclick）
 ├── styles.css              ダークテーマ（ゴールド系）
@@ -41,10 +42,13 @@ hermes-mobile/
 | --- | --- | --- |
 | `#/` | ホーム | 1 位のヒーローカード / 2・3 位 / 全 N 銘柄への導線 / ウォッチリストの変動 |
 | `#/all` | 全銘柄 | 最新 `run_date` を `rank` 昇順で全件 |
-| `#/s/<code>` | 銘柄詳細 | スコア推移（直近 10 回）と `scoring_breakdown` の内訳 |
+| `#/s/<code>` | 銘柄詳細 | スコア推移（直近 30 回）と `scoring_breakdown` のグループ別内訳 |
+| `#/article` | 記事 | その日の note 記事（`#/article/<YYYY-MM-DD>` で過去分） |
+| `#/weekly` | 週次 | `diff_reports` の今週のスコア変動 |
 | `#/settings` | 設定 | アカウント / 通知の有効化・解除（Phase B の画面） |
 
-読むテーブルは `screening_results` / `scoring_breakdown` / `watchlist` の 3 つで、
+読むテーブルは `screening_results` / `scoring_breakdown` / `watchlist` /
+`daily_articles` / `diff_reports` の 5 つで、
 **すべてログイン中のユーザーの JWT（`authenticated`）経由**。`anon` キーは `apikey`
 ヘッダにしか使っておらず、`service_role` はアプリに存在しない。書き込みは
 `push_subscriptions` の upsert / delete だけで、Phase B から増えていない。
@@ -52,6 +56,15 @@ hermes-mobile/
 **前回比**は「最新 `run_date`」と「その 1 つ前の `run_date`」の `total_score` の差。
 `screening_results` は上位 N 銘柄しか持たないので、ウォッチ銘柄がそこに居ない場合は
 0 点扱いにせず **「圏外」** と表示する。
+
+### 記事表示について（Phase D-2）
+
+記事の**正本は Obsidian 側の Markdown**（`Daily/YYYY-MM/YYYYMMDD_note_article.md`）で、
+`daily_articles` はアプリ配信用の写し。18:00 バッチの Step 3.7 が upsert する。
+
+- Markdown は `markdown.js` が **DOM を直接組み立てて**描画する。`innerHTML` は使わない。
+- 記事中の画像は vault の相対パス（`charts/*.png`）。PNG は Pages にも Supabase にも
+  無いので `img` は出さず、「図があった」ことだけをキャプションで残す。
 
 **内訳の可視化はキー名を決め打ちしない。** 「値がオブジェクトのものはグループ」
 「その中の数値が項目」「`subtotal` があれば小計」という構造だけを仮定しているので、
