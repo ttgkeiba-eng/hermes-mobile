@@ -15,6 +15,7 @@
 // グループの小計」という構造だけを仮定する。バッチ側が項目を足しても画面は壊れない。
 
 import { select } from "./session.js";
+import { renderMarkdown } from "./markdown.js";
 
 // ── 表示ラベル ──────────────────────────────────────────────────────────────
 //
@@ -216,6 +217,26 @@ export async function loadDetail(ticker, runDate) {
   };
 }
 
+/**
+ * note 記事（Phase D-2）。日付を指定しなければ最新 1 件。
+ *
+ * 記事の正本は Obsidian 側の Markdown で、daily_articles はその写し。
+ * ここで読めなくても記事そのものは失われていない、という前提で画面を書く。
+ */
+export async function loadArticle(runDate) {
+  const filter = runDate ? `&run_date=eq.${runDate}` : "";
+  const rows = await select(
+    `daily_articles?select=run_date,title,body,created_at${filter}` +
+      "&order=run_date.desc&limit=1",
+  );
+  return rows.length ? rows[0] : null;
+}
+
+/** 記事一覧（過去分への導線用）。本文は重いので引かない。 */
+export function loadArticleIndex(limit = 14) {
+  return select(`daily_articles?select=run_date,title&order=run_date.desc&limit=${limit}`);
+}
+
 // ── 部品 ────────────────────────────────────────────────────────────────────
 
 function deltaChip(delta) {
@@ -280,6 +301,21 @@ function runnerCard(row) {
   return linkTo(card, row.ticker);
 }
 
+/** ホームから別画面へ送るカード。行ではなくカードなのは、銘柄の行と混ざらないため。 */
+function navCard(title, note, hash) {
+  const card = el("button", "nav-card");
+  card.type = "button";
+  const text = el("span", "nav-text");
+  text.append(el("span", "nav-title", title));
+  text.append(el("span", "nav-note", note));
+  card.append(text);
+  card.append(el("span", "nav-arrow", "›"));
+  card.addEventListener("click", () => {
+    location.hash = hash;
+  });
+  return card;
+}
+
 function stockRow(row, { showRank = true } = {}) {
   const line = el("div", "srow");
   if (showRank) line.append(el("span", "srow-rank mono", Number.isFinite(num(row.rank)) ? `${row.rank}` : "—"));
@@ -330,6 +366,11 @@ export function renderHome(root, data) {
     location.hash = "#/all";
   });
   root.append(allButton);
+
+  // レポートへの導線。銘柄の並びより下、ウォッチリストより上に置く。
+  const links = el("div", "nav-cards");
+  links.append(navCard("本日のレポートを読む", "note 記事をそのまま", "#/article"));
+  root.append(links);
 
   // ── ウォッチリストの変動 ──
   const block = el("section", "block");
@@ -604,4 +645,47 @@ export function renderDetail(root, detail, overviewRow) {
         "売買の推奨でもありません。投資の判断はご自身の責任で行ってください。",
     ),
   );
+}
+
+// ── note 記事 ───────────────────────────────────────────────────────────────
+
+export function renderArticle(root, article, index) {
+  root.textContent = "";
+
+  if (!article) {
+    root.append(
+      el("p", "empty", "まだ記事が届いていません。18:00 のバッチが記事を書くと、ここに並びます。"),
+    );
+    return;
+  }
+
+  const head = el("header", "article-head");
+  head.append(el("span", "run-date", `${fmtDate(article.run_date)} のレポート`));
+  head.append(el("h1", "article-title", article.title));
+  root.append(head);
+
+  const body = el("article", "md");
+  // 画面上部にタイトルを出しているので、本文先頭の同じ H1 は落とす
+  body.append(renderMarkdown(article.body, article.title));
+  root.append(body);
+
+  // 過去分。記事は日ごとに独立しているので、日付だけのシンプルな並びにする。
+  const others = (index || []).filter((row) => row.run_date !== article.run_date);
+  if (others.length) {
+    const block = el("section", "block");
+    block.append(el("h2", null, "過去のレポート"));
+    const list = el("div", "rows");
+    for (const row of others) {
+      const line = el("div", "srow");
+      const label = el("div", "srow-label");
+      label.append(el("span", "ticker", fmtDate(row.run_date)));
+      label.append(el("span", "name", row.title));
+      line.append(label);
+      line.append(el("span", "nav-arrow", "›"));
+      linkTo(line, null, `#/article/${row.run_date}`);
+      list.append(line);
+    }
+    block.append(list);
+    root.append(block);
+  }
 }

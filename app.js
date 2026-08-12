@@ -20,7 +20,16 @@ import {
   signIn,
   signOut,
 } from "./session.js";
-import { loadDetail, loadOverview, renderAll, renderDetail, renderHome } from "./dashboard.js";
+import {
+  loadArticle,
+  loadArticleIndex,
+  loadDetail,
+  loadOverview,
+  renderAll,
+  renderArticle,
+  renderDetail,
+  renderHome,
+} from "./dashboard.js";
 
 // ── DOM ─────────────────────────────────────────────────────────────────────
 
@@ -33,7 +42,7 @@ const testButton = $("test-button");
 const disableButton = $("disable-button");
 const settingsButton = $("settings-button");
 
-const VIEWS = ["login", "home", "all", "detail", "settings"];
+const VIEWS = ["login", "home", "all", "detail", "article", "settings"];
 
 // 取得済みの一覧。全銘柄・詳細から使い回すのでここに持つ（再取得を避ける）。
 let overview = null;
@@ -193,10 +202,12 @@ async function refreshPushState() {
 // リロード時に 404 になる（/all という実ファイルは無い）。ハッシュなら常に
 // index.html が返り、戻る／進むも端末の標準操作がそのまま効く。
 //
-//   #/          ホーム
-//   #/all       全銘柄
-//   #/s/<code>  銘柄詳細
-//   #/settings  設定
+//   #/              ホーム
+//   #/all           全銘柄
+//   #/s/<code>      銘柄詳細
+//   #/article       最新の note 記事
+//   #/article/<日付> 指定日の note 記事（YYYY-MM-DD）
+//   #/settings      設定
 
 function parseRoute() {
   const hash = location.hash.replace(/^#/, "");
@@ -204,6 +215,7 @@ function parseRoute() {
   if (!parts.length) return { name: "home" };
   if (parts[0] === "all") return { name: "all" };
   if (parts[0] === "settings") return { name: "settings" };
+  if (parts[0] === "article") return { name: "article", runDate: parts[1] || null };
   if (parts[0] === "s" && parts[1]) return { name: "detail", ticker: decodeURIComponent(parts[1]) };
   return { name: "home" };
 }
@@ -258,6 +270,24 @@ async function route() {
     body.textContent = "読み込み中…";
     try {
       renderAll(body, await ensureOverview());
+    } catch (error) {
+      body.textContent = "";
+      say(error.message, "bad");
+    }
+    return;
+  }
+
+  if (target.name === "article") {
+    showView("article");
+    const body = $("article-body");
+    body.textContent = "読み込み中…";
+    try {
+      // 本文と一覧は独立。一覧が取れなくても記事は出す。
+      const [article, index] = await Promise.all([
+        loadArticle(target.runDate),
+        loadArticleIndex().catch(() => []),
+      ]);
+      renderArticle(body, article, index);
     } catch (error) {
       body.textContent = "";
       say(error.message, "bad");
