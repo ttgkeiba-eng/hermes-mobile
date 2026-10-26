@@ -3,7 +3,7 @@
 // 役割は 3 つ:
 //   'push'              … サーバから届いた暗号化本文を復号済み JSON として受け取り通知を出す
 //   'notificationclick' … 既存ウィンドウがあれば focus、無ければ開く
-//   'fetch'             … 素通し。Chrome のインストール要件を満たすためだけに置いている
+//   'fetch'             … アプリ自身のファイルは毎回サーバに「変わったか」を確かめて取る
 //
 // 本文の復号はブラウザが購読の秘密鍵で自動的に済ませてくれるので、ここでは
 // event.data.json() を読むだけでよい。暗号化側（Edge Function send-push）が
@@ -12,7 +12,7 @@
 // 送られてくる JSON は send-push の buildPayload と対になっている:
 //   { id, type, title, body, data }
 
-const VERSION = "hermes-sw-v2";
+const VERSION = "hermes-sw-v3";
 
 // 通知の種類ごとの着地先（アプリ内ハッシュルート）。
 // 未知の種類はホームに落とす。存在しない画面へ飛ばして空白を見せない。
@@ -33,9 +33,23 @@ self.addEventListener("activate", (event) => {
 });
 
 // Chrome は「fetch ハンドラを持つ SW」をインストール可能の条件にしている。
-// キャッシュはしない（オフライン対応は今回のスコープ外）。素通しさせるだけ。
-self.addEventListener("fetch", () => {
-  // respondWith を呼ばなければブラウザが通常どおりネットワークへ行く。
+//
+// アプリ自身のファイル（同じオリジンの GET）は cache: "no-cache" で取る。ブラウザの
+// キャッシュは使うが、毎回サーバに「変わったか」を確かめる（変わっていなければ 304 で軽い）。
+// GitHub Pages は 10 分キャッシュさせるので、これが無いと公開直後に新しい app.js と
+// 古い dashboard.js が混ざって画面が出ないことがある。
+// Supabase など別オリジンへの通信には触らない（素通し）。オフライン対応はしない。
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "GET") return;
+  if (new URL(request.url).origin !== self.location.origin) return;
+  // 画面そのもの（navigate）は Request を作り直せないので URL で取り直す。
+  // スコープの中ではリダイレクトは起きない（/hermes-mobile → / の補正はスコープの外）。
+  event.respondWith(
+    request.mode === "navigate"
+      ? fetch(request.url, { cache: "no-cache", credentials: "same-origin" })
+      : fetch(request, { cache: "no-cache" }),
+  );
 });
 
 self.addEventListener("push", (event) => {

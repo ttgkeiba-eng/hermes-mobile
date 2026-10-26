@@ -12,6 +12,10 @@
 <link rel="icon" href="./icons/icon-192.png">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <meta name="theme-color" content="#0B0D14">
+<!-- iPhone のホーム画面から開いたとき、上端の時刻・電波の帯を暗い背景に合わせる -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hermes">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -21,27 +25,39 @@
     <div class="mark" aria-hidden="true">H</div>
     <div class="head-text">
       <h1>Hermes</h1>
-      <p class="sub">日次スクリーニング</p>
+      <p class="sub" id="head-sub">日次スクリーニング</p>
     </div>
-    <!-- ログイン後だけ出す。設定（通知・アカウント）への入口 -->
-    <button id="settings-button" class="icon-button" type="button" hidden
-            aria-label="設定">設定</button>
+    <!-- ログイン後だけ出す -->
+    <button id="refresh-button" class="icon-button round" type="button" hidden aria-label="最新を読み込む">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="settings-button" class="icon-button round" type="button" hidden aria-label="設定">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    </button>
   </header>
 
   <!-- 起動直後はどの画面も隠しておき、セッション判定後に出し分ける -->
 
-  <section id="view-login" class="view card" hidden>
-    <h2>ログイン</h2>
-    <form id="login-form" novalidate>
-      <label for="email">メールアドレス</label>
-      <input id="email" type="email" autocomplete="username" required
-             inputmode="email" autocapitalize="off" spellcheck="false">
+  <section id="view-login" class="view" hidden>
+    <div class="card login-card">
+      <h2 class="login-title">ログイン</h2>
+      <form id="login-form" novalidate>
+        <label for="email">メールアドレス</label>
+        <input id="email" type="email" autocomplete="username" required
+               inputmode="email" autocapitalize="off" spellcheck="false">
 
-      <label for="password">パスワード</label>
-      <input id="password" type="password" autocomplete="current-password" required>
+        <label for="password">パスワード</label>
+        <div class="password-field">
+          <input id="password" type="password" autocomplete="current-password" required>
+          <button id="password-toggle" class="password-toggle" type="button"
+                  aria-label="パスワードを表示" aria-pressed="false">表示</button>
+        </div>
 
-      <button type="submit" class="primary" id="login-button">ログイン</button>
-    </form>
+        <p id="login-error" class="login-error" role="alert" hidden></p>
+        <button type="submit" class="primary" id="login-button">ログイン</button>
+      </form>
+      <p class="hint" id="login-hint"></p>
+    </div>
   </section>
 
   <!-- ホーム（ログイン後の初期画面）。中身は dashboard.js が組み立てる -->
@@ -49,7 +65,6 @@
 
   <!-- 全銘柄 -->
   <section id="view-all" class="view" hidden>
-    <button class="back" type="button" data-back>← ホーム</button>
     <div id="all-body"></div>
   </section>
 
@@ -61,25 +76,22 @@
 
   <!-- note 記事 -->
   <section id="view-article" class="view" hidden>
-    <button class="back" type="button" data-back>← ホーム</button>
     <div id="article-body"></div>
   </section>
 
   <!-- 週次 diff レポート -->
   <section id="view-weekly" class="view" hidden>
-    <button class="back" type="button" data-back>← ホーム</button>
     <div id="weekly-body"></div>
   </section>
 
   <!-- アプリ内チャット -->
   <section id="view-chat" class="view" hidden>
-    <button class="back" type="button" data-back>← 戻る</button>
     <div id="chat-body"></div>
   </section>
 
   <!-- 設定（Phase B の画面をそのまま移設） -->
   <section id="view-settings" class="view" hidden>
-    <button class="back" type="button" data-back>← ホーム</button>
+    <button class="back" type="button" data-back>← 戻る</button>
 
     <section class="card">
       <div class="row">
@@ -110,6 +122,30 @@
     <span id="diag" class="diag"></span>
   </footer>
 </main>
+
+<!-- 下のタブ。ログイン後だけ出す。親指が届く位置に主な画面を並べる -->
+<nav id="tabbar" class="tabbar" hidden aria-label="画面の切り替え">
+  <a class="tab" href="#/" data-tab="home">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+    <span>ホーム</span>
+  </a>
+  <a class="tab" href="#/all" data-tab="all">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    <span>銘柄</span>
+  </a>
+  <a class="tab" href="#/article" data-tab="article">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h7l4 4v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM14 4v4h4M9 12h6M9 16h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>
+    <span>記事</span>
+  </a>
+  <a class="tab" href="#/weekly" data-tab="weekly">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V9M10 19V5M15 19v-7M20 19v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    <span>週次</span>
+  </a>
+  <a class="tab" href="#/chat" data-tab="chat">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5v8a1.5 1.5 0 0 1-1.5 1.5H10l-4 3.5V16h0a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+    <span>質問</span>
+  </a>
+</nav>
 
 <script type="module" src="./app.js"></script>
 </body>
