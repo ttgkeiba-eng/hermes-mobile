@@ -4,7 +4,7 @@
 //   1. Supabase にログインしてアクセストークンを持つ（session.js）
 //   2. Service Worker を登録して Push を購読する
 //   3. 購読(endpoint/p256dh/auth)を push_subscriptions に upsert する
-//   4. ダッシュボードを出す（dashboard.js / Phase D で追加）
+//   4. ダッシュボードを出す（dashboard.js / グラフは charts.js）
 //
 // 依存ゼロ。supabase-js も使わず fetch で GoTrue と PostgREST を直接叩く。
 // hermes-project 側（supabase_sync.py の urllib、send-push の fetch）と同じ作法で、
@@ -12,9 +12,11 @@
 
 import { VAPID_PUBLIC_KEY } from "./config.js";
 import {
+  NetworkError,
   ensureFreshToken,
   getSession,
   loadSession,
+  rememberedEmail,
   rest,
   setSignedOutHandler,
   signIn,
@@ -31,6 +33,7 @@ import {
   renderDetail,
   renderHome,
   renderWeekly,
+  skeleton,
 } from "./dashboard.js";
 import { loadBacklog, renderChat } from "./chat.js";
 
@@ -44,11 +47,17 @@ const enableButton = $("enable-button");
 const testButton = $("test-button");
 const disableButton = $("disable-button");
 const settingsButton = $("settings-button");
+const refreshButton = $("refresh-button");
+const tabbar = $("tabbar");
+const headSub = $("head-sub");
 
 const VIEWS = ["login", "home", "all", "detail", "article", "weekly", "chat", "settings"];
 
 // 取得済みの一覧。全銘柄・詳細から使い回すのでここに持つ（再取得を避ける）。
 let overview = null;
+
+const isStandalone = () =>
+  window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
 // ── 表示 ────────────────────────────────────────────────────────────────────
 
@@ -61,10 +70,79 @@ function setBusy(busy) {
   for (const el of document.querySelectorAll("button")) el.disabled = busy;
 }
 
-function showView(name) {
+/** 今どのタブの画面か。詳細は来た元（銘柄）に、設定はどれにも当てない。 */
+const TAB_OF = { home: "home", all: "all", detail: "all", article: "article", weekly: "weekly", chat: "chat" };
+
+function showView(name, { keepScroll = false } = {}) {
   for (const view of VIEWS) $(`view-${view}`).hidden = view !== name;
-  settingsButton.hidden = name === "login";
-  window.scrollTo(0, 0);
+  const signedIn = name !== "login";
+  settingsButton.hidden = !signedIn;
+  refreshButton.hidden = !signedIn || name === "settings" || name === "chat";
+  tabbar.hidden = !signedIn;
+  document.body.classList.toggle("has-tabbar", signedIn);
+  for (const tab of tabbar.querySelectorAll(".tab")) {
+    const on = tab.dataset.tab === TAB_OF[name];
+    tab.classList.toggle("on", on);
+    if (on) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  }
+  if (!keepScroll) window.scrollTo(0, 0);
+}
+
+/** ヘッダの下の行に「いつの取得か」を出す。古い画面を見ていないかが一目で分かる。 */
+function showFetchedAt(date) {
+  if (!date) {
+    headSub.textContent = "日次スクリーニング";
+    return;
+  }
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  headSub.textContent = `${hh}:${mm} に取得`;
+}
+
+/**
+ * 読み込みの失敗を、その画面の中に出す。通信の失敗ならやり直しのボタンを付ける。
+ * （下の status 行だけだと、画面が空のまま理由が見えないことがある）
+ */
+function showError(body, error) {
+  body.textContent = "";
+  const box = document.createElement("div");
+  box.className = "error-box";
+  const text = document.createElement("p");
+  text.textContent = error instanceof NetworkError
+    ? error.message
+    : `読み込めませんでした。${error.message}`;
+  box.append(text);
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "ghost";
+  retry.textContent = "もう一度読み込む";
+  retry.addEventListener("click", () => refresh());
+  box.append(retry);
+  body.append(box);
+}
+
+/**
+ * 画面を描き直す。前の中身があれば消さずに薄くして待つ（ちらつかせない）。
+ * 無ければ骨組みを出す。
+ */
+async function paint(body, kind, work, key = kind) {
+  // 別の銘柄・別の日付の中身は薄くして残さない（違うものを見せてしまうため）
+  const sameThing = body.dataset.key === key;
+  body.dataset.key = key;
+  const hadContent = sameThing && body.childElementCount > 0 && !body.querySelector(".skeleton, .error-box");
+  if (hadContent) body.classList.add("is-refreshing");
+  else {
+    body.textContent = "";
+    body.append(skeleton(kind));
+  }
+  try {
+    await work();
+  } catch (error) {
+    showError(body, error);
+  } finally {
+    body.classList.remove("is-refreshing");
+  }
 }
 
 // ── Push ────────────────────────────────────────────────────────────────────
@@ -233,18 +311,28 @@ function goHome(replace = false) {
   else location.hash = "#/";
 }
 
-/** 一覧を持っていなければ取りに行く。失敗しても画面は残す（文字で理由を出す）。 */
+/** 一覧を持っていなければ取りに行く。 */
 async function ensureOverview({ force = false } = {}) {
   if (overview && !force) return overview;
   overview = await loadOverview();
+  showFetchedAt(overview.fetchedAt);
   return overview;
 }
 
-async function route() {
+/** 前の route() がまだ読み込み中に次が来たら、前の結果は描かない。 */
+let routeSeq = 0;
+
+async function route({ force = false } = {}) {
+  const seq = ++routeSeq;
+  const stale = () => seq !== routeSeq;
+
   if (!getSession()) {
+    // ログイン画面に戻った理由（期限切れなど）は消さずに残す
     showView("login");
+    prepareLogin();
     return;
   }
+  say("");
 
   const target = parseRoute();
 
@@ -258,115 +346,138 @@ async function route() {
   if (target.name === "detail") {
     showView("detail");
     const body = $("detail-body");
-    body.textContent = "読み込み中…";
-    try {
-      const data = await ensureOverview();
+    await paint(body, "detail", async () => {
+      const data = await ensureOverview({ force });
       const row = data.rows.find((r) => r.ticker === target.ticker)
         || data.watch.find((r) => r.ticker === target.ticker);
       const detail = await loadDetail(target.ticker, data.runDate);
-      renderDetail(body, detail, row);
-    } catch (error) {
-      body.textContent = "";
-      say(error.message, "bad");
-    }
+      if (!stale()) renderDetail(body, detail, row);
+    }, `detail:${target.ticker}`);
     return;
   }
 
   if (target.name === "all") {
     showView("all");
     const body = $("all-body");
-    body.textContent = "読み込み中…";
-    try {
-      renderAll(body, await ensureOverview());
-    } catch (error) {
-      body.textContent = "";
-      say(error.message, "bad");
-    }
+    await paint(body, "list", async () => {
+      const data = await ensureOverview({ force });
+      if (!stale()) renderAll(body, data);
+    });
     return;
   }
 
   if (target.name === "article") {
     showView("article");
     const body = $("article-body");
-    body.textContent = "読み込み中…";
-    try {
+    await paint(body, "list", async () => {
       // 本文と一覧は独立。一覧が取れなくても記事は出す。
       const [article, index] = await Promise.all([
         loadArticle(target.runDate),
         loadArticleIndex().catch(() => []),
       ]);
-      renderArticle(body, article, index);
-    } catch (error) {
-      body.textContent = "";
-      say(error.message, "bad");
-    }
+      if (!stale()) renderArticle(body, article, index);
+    }, `article:${target.runDate || "latest"}`);
     return;
   }
 
   if (target.name === "chat") {
     showView("chat");
     const body = $("chat-body");
-    body.textContent = "読み込み中…";
-    try {
+    await paint(body, "list", async () => {
       // 過去ログの取得に失敗しても会話は始められる。ここで止めない。
       await loadBacklog().catch((error) => say(`過去ログを読めません: ${error.message}`, "warn"));
       const data = overview ? overview : await ensureOverview().catch(() => null);
-      renderChat(body, target.ticker, data?.runDate ?? null);
-    } catch (error) {
-      body.textContent = "";
-      say(error.message, "bad");
-    }
+      if (!stale()) renderChat(body, target.ticker, data?.runDate ?? null);
+    }, `chat:${target.ticker || ""}`);
     return;
   }
 
   if (target.name === "weekly") {
     showView("weekly");
     const body = $("weekly-body");
-    body.textContent = "読み込み中…";
-    try {
-      renderWeekly(body, await loadDiffReport());
-    } catch (error) {
-      body.textContent = "";
-      say(error.message, "bad");
-    }
+    await paint(body, "list", async () => {
+      const report = await loadDiffReport();
+      if (!stale()) renderWeekly(body, report);
+    });
     return;
   }
 
   // ホーム
   showView("home");
   const home = $("view-home");
-  if (!overview) home.textContent = "読み込み中…";
+  await paint(home, "home", async () => {
+    const data = await ensureOverview({ force });
+    if (!stale()) renderHome(home, data);
+  });
+}
+
+/** 右上の更新。今の画面のデータを取り直す（一覧も）。 */
+async function refresh() {
+  refreshButton.classList.add("spinning");
   try {
-    renderHome(home, await ensureOverview());
-  } catch (error) {
-    home.textContent = "";
-    say(error.message, "bad");
+    overview = null;
+    await route({ force: true });
+  } finally {
+    refreshButton.classList.remove("spinning");
   }
 }
 
-// ── イベント ────────────────────────────────────────────────────────────────
+// ── ログイン画面 ────────────────────────────────────────────────────────────
+
+const emailInput = $("email");
+const passwordInput = $("password");
+const passwordToggle = $("password-toggle");
+
+function prepareLogin() {
+  if (!emailInput.value) emailInput.value = rememberedEmail();
+  // ホーム画面のアプリと Safari はログインの保存場所が別。片方でログインしても
+  // もう片方は未ログインのまま、という戸惑いを先に潰しておく。
+  $("login-hint").textContent = isStandalone()
+    ? "ホーム画面のアプリは Safari とは別にログインを覚えます。一度ログインすれば、次からは開くだけで入れます。"
+    : "通知を受け取るには、Safari の共有メニューから「ホーム画面に追加」して、追加したアプリでログインしてください。";
+}
+
+passwordToggle.addEventListener("click", () => {
+  const show = passwordInput.type === "password";
+  passwordInput.type = show ? "text" : "password";
+  passwordToggle.textContent = show ? "隠す" : "表示";
+  passwordToggle.setAttribute("aria-pressed", String(show));
+  passwordToggle.setAttribute("aria-label", show ? "パスワードを隠す" : "パスワードを表示");
+});
 
 $("login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   setBusy(true);
+  const loginError = $("login-error");
+  loginError.hidden = true;
   say("ログイン中…");
   try {
-    await signIn($("email").value.trim(), $("password").value);
-    $("password").value = "";
+    await signIn(emailInput.value.trim(), passwordInput.value);
+    passwordInput.value = "";
+    passwordInput.type = "password";
+    passwordToggle.textContent = "表示";
     say("");
     overview = null;
     goHome(true);
     await route();
   } catch (error) {
-    say(`ログインに失敗: ${error.message}`, "bad");
+    // 理由はボタンのすぐ上に出す（画面の下の行だと、キーボードに隠れて見えない）
+    say("");
+    loginError.textContent = error.message;
+    loginError.hidden = false;
+    passwordInput.focus();
   } finally {
     setBusy(false);
   }
 });
 
+// ── イベント ────────────────────────────────────────────────────────────────
+
 settingsButton.addEventListener("click", () => {
   location.hash = "#/settings";
 });
+
+refreshButton.addEventListener("click", () => refresh());
 
 for (const button of document.querySelectorAll("[data-back]")) {
   button.addEventListener("click", () => {
@@ -374,6 +485,16 @@ for (const button of document.querySelectorAll("[data-back]")) {
     // 通知や外部リンクから直接来た場合は履歴が無いのでホームへ落とす。
     if (history.length > 1) history.back();
     else goHome();
+  });
+}
+
+// 今いるタブをもう一度押したら、先頭へ戻す（一覧を下まで見た後に便利）
+for (const tab of tabbar.querySelectorAll(".tab")) {
+  tab.addEventListener("click", (event) => {
+    if (tab.classList.contains("on") && location.hash === tab.getAttribute("href")) {
+      event.preventDefault();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   });
 }
 
@@ -424,20 +545,24 @@ disableButton.addEventListener("click", async () => {
 $("logout-button").addEventListener("click", async () => {
   signOut();
   overview = null;
-  say("ログアウトしました");
+  showFetchedAt(null);
   goHome(true);
   await route();
+  say("ログアウトしました");
 });
 
 window.addEventListener("hashchange", () => {
   route();
 });
 
-// セッションが切れたら（リフレッシュ失敗 / 401）ログイン画面へ戻す。
-setSignedOutHandler(() => {
+// セッションが切れたら（更新トークンの失効 / 2 回続けての 401）ログイン画面へ戻す。
+// 通信エラーではここに来ない（session.js が NetworkError として投げ、画面に残す）。
+setSignedOutHandler((message) => {
   overview = null;
+  showFetchedAt(null);
   showView("login");
-  say("セッションが切れました。もう一度ログインしてください。", "warn");
+  prepareLogin();
+  say(message || "セッションが切れました。もう一度ログインしてください。", "warn");
 });
 
 // 通知タップで開かれた／前面化されたときの着地。batch_done はホームに落とす。
@@ -451,16 +576,16 @@ navigator.serviceWorker?.addEventListener("message", async (event) => {
   else await route();
 });
 
-// PWA を再前面化したときに古い日付のまま残らないようにする。
+// PWA を再前面化したとき、30 分以上前の取得なら取り直す。
+// 取れなければ表示中のものを残す（ログアウトはしない）。
+const STALE_MS = 30 * 60_000;
 document.addEventListener("visibilitychange", async () => {
   if (document.visibilityState !== "visible" || !getSession()) return;
-  if (parseRoute().name !== "home") return;
-  try {
-    await ensureOverview({ force: true });
-    await route();
-  } catch {
-    /* 取れなければ表示中のものを残す */
-  }
+  const name = parseRoute().name;
+  if (name !== "home" && name !== "all") return;
+  if (overview && Date.now() - overview.fetchedAt.getTime() < STALE_MS) return;
+  overview = null;
+  await route({ force: true });
 });
 
 // ── 起動 ────────────────────────────────────────────────────────────────────
@@ -469,7 +594,11 @@ document.addEventListener("visibilitychange", async () => {
   loadSession();
 
   if (getSession()) {
-    await ensureFreshToken();
+    try {
+      await ensureFreshToken();
+    } catch {
+      // 起動直後で通信がまだ無い。セッションは残し、画面側で理由とやり直しを出す。
+    }
     // 通知から開かれた直後を除き、起動時はホームに揃える。
     if (!location.hash) history.replaceState(null, "", "#/");
   }
@@ -488,6 +617,6 @@ document.addEventListener("visibilitychange", async () => {
   $("diag").textContent = [
     pushSupported() ? "push:対応" : "push:非対応",
     window.isSecureContext ? "https:ok" : "https:なし",
-    window.matchMedia("(display-mode: standalone)").matches ? "PWA" : "ブラウザ",
+    isStandalone() ? "PWA" : "ブラウザ",
   ].join(" / ");
 })();
