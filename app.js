@@ -27,6 +27,7 @@ import {
   loadArticleIndex,
   loadDetail,
   loadDiffReport,
+  loadWeeklyCandidates,
   loadOverview,
   renderAll,
   renderArticle,
@@ -288,7 +289,7 @@ async function refreshPushState() {
 //   #/s/<code>      銘柄詳細
 //   #/article       最新の note 記事
 //   #/article/<日付> 指定日の note 記事（YYYY-MM-DD）
-//   #/weekly        週次 diff レポート
+//   #/weekly        今週の候補TOP5 と週次 diff レポート
 //   #/chat          アプリ内チャット
 //   #/chat/<code>   銘柄を添えたチャット（銘柄詳細から）
 //   #/settings      設定
@@ -396,8 +397,8 @@ async function route({ force = false } = {}) {
     showView("weekly");
     const body = $("weekly-body");
     await paint(body, "list", async () => {
-      const report = await loadDiffReport();
-      if (!stale()) renderWeekly(body, report);
+      const [report, candidates] = await Promise.all([loadDiffReport(), loadWeeklyCandidates()]);
+      if (!stale()) renderWeekly(body, report, candidates);
     });
     return;
   }

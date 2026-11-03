@@ -509,6 +509,24 @@ h1 { margin: 0; font-size: 20px; letter-spacing: .04em; }
 }
 .summary-card p { margin: 0; font-size: 13.5px; line-height: 1.8; }
 
+/* ── 今週の候補TOP5 ── */
+.cand-rank { color: var(--gold); font-size: 13px; font-weight: 700; min-width: 1em; }
+.cand-score { font-size: 13px; color: var(--text); white-space: nowrap; }
+.cand-earn {
+  font-size: 10.5px;
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.cand-earn.in_week { color: var(--gold); border-color: rgba(201, 162, 75, .55); }
+.cand-result { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.cand-result-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cand-result-label { font-size: 11px; color: var(--muted); }
+.cand-names { display: flex; flex-direction: column; gap: 4px; }
+.cand-name-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; }
+
 .diff-scores { font-size: 12.5px; color: var(--muted); }
 .diff-to { color: var(--text); }
 
