@@ -48,7 +48,7 @@ hermes-mobile/
 | `#/all` | 銘柄 | 最新 `run_date` の全件。名前・コードの検索、セクターの絞り込み、並べ替え（順位・上がった順・下がった順） |
 | `#/s/<code>` | 銘柄詳細 | スコアと順位の推移（折れ線 2 枚、1か月 / 3か月、タップで値、表でも読める）と内訳 |
 | `#/article` | 記事 | その日の note 記事（`#/article/<YYYY-MM-DD>` で過去分） |
-| `#/weekly` | 週次 | `diff_reports` の今週のスコア変動（大きく動いた銘柄の分岐棒つき） |
+| `#/weekly` | 週次 | `weekly_candidates` の今週の候補TOP5（決算の印・先週の答え合わせつき）と、`diff_reports` の今週のスコア変動（大きく動いた銘柄の分岐棒つき） |
 | `#/chat` | 質問 | Hermes に質問する（`#/chat/<code>` で銘柄を添える） |
 | `#/settings` | 設定 | アカウント / 通知の有効化・解除（右上のボタンから） |
 
@@ -58,7 +58,7 @@ hermes-mobile/
 `screening_results` には**その日に採点した全銘柄**（約 350）が入っている（上位だけではない）。
 
 読むテーブルは `screening_results` / `scoring_breakdown` / `watchlist` /
-`daily_articles` / `diff_reports` の 5 つで、
+`daily_articles` / `diff_reports` / `weekly_candidates` の 6 つで、
 **すべてログイン中のユーザーの JWT（`authenticated`）経由**。`anon` キーは `apikey`
 ヘッダにしか使っておらず、`service_role` はアプリに存在しない。書き込みは
 `push_subscriptions` の upsert / delete だけで、Phase B から増えていない。

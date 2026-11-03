@@ -181,6 +181,36 @@ function inValues(url, key) {
 }
 
 /** テーブル名と URL から JSON を返す。知らない問い合わせは null。 */
+function weeklyCandidates() {
+  const earn = [
+    { level: "none", label: "" },
+    { level: "in_week", label: "今週決算の見込み" },
+    { level: "none", label: "" },
+    { level: "near", label: "決算が近い見込み" },
+    { level: "none", label: "" },
+  ];
+  const picks = STOCKS.slice(0, 5).map((s, i) => ({
+    rank: i + 1, code: s.ticker, name: s.name, sector: s.sector, total_score: 88 - i,
+    fundamental: 3, earnings: earn[i],
+  }));
+  return {
+    week_start: "2026-11-09",
+    judge_date: "2026-11-06",
+    summary: "11/09 の週の候補",
+    payload: {
+      week_start: "2026-11-09", entry_date: "2026-11-09", exit_date: "2026-11-13",
+      judge_date: "2026-11-06", oos: true, population: 412, picks,
+      last_week: {
+        week_start: "2026-11-02", return_top: 0.0123, return_universe: 0.0041, excess: 0.0082,
+        names: picks.map((p, i) => ({ code: p.code, name: p.name, return: 0.03 - i * 0.012 })),
+      },
+      record: { points: 1, target: 20, mean_excess: 0.0082, positive_weeks: 1, series: [] },
+      checkpoint: null,
+      note: "調べる入り口として5銘柄に絞ったものです。上がると見込んだ銘柄ではなく、買い推奨でもありません。売買の判断はご自身で行ってください。",
+    },
+  };
+}
+
 export function answer(table, url) {
   if (table === "screening_results") {
     const select = param(url, "select");
@@ -221,6 +251,7 @@ export function answer(table, url) {
     return rows.slice(0, Number(param(url, "limit") || rows.length));
   }
   if (table === "diff_reports") return [diffReport()];
+  if (table === "weekly_candidates") return [weeklyCandidates()];
   if (table === "chat_messages") return CHAT.slice().reverse();
   return null;
 }

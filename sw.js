@@ -90,9 +90,12 @@ self.addEventListener("notificationclick", (event) => {
   const scopeUrl = new URL("./", self.location.href).href;
   // batch_done は「その日の結果が出た」合図なので、ホーム（1位のヒーロー）に着地させる。
   // data.ticker が入っている通知（将来の tdnet_hit 想定）はその銘柄の詳細へ。
+  // data.route は今週の候補TOP5 の通知（週次の画面へ）。
   const landing = data.ticker
     ? `#/s/${encodeURIComponent(data.ticker)}`
-    : (LANDING[data.type] || "#/");
+    : data.route === "weekly"
+      ? "#/weekly"
+      : (LANDING[data.type] || "#/");
   const targetUrl = scopeUrl + landing;
 
   event.waitUntil((async () => {

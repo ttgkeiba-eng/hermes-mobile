@@ -267,6 +267,25 @@ export function loadArticleIndex(limit = 14) {
   return select(`daily_articles?select=run_date,title&order=run_date.desc&limit=${limit}`);
 }
 
+/**
+ * 今週の候補TOP5。最新 1 件。
+ * 週次の画面の本体はスコアの変動なので、この表が読めなくても画面は止めない
+ * （テーブルを作る前のアプリが開いても、候補の欄が出ないだけで済ませる）。
+ */
+export async function loadWeeklyCandidates() {
+  try {
+    const rows = await select(
+      "weekly_candidates?select=week_start,judge_date,summary,payload&order=week_start.desc&limit=1",
+    );
+    return rows.length ? rows[0] : null;
+  } catch (error) {
+    // 表が無い（404）などの取得の失敗だけを受ける。ログイン切れや通信断は今までどおり上へ。
+    if (!String(error?.message).startsWith("取得に失敗しました")) throw error;
+    console.warn("weekly_candidates を読めない", error);
+    return null;
+  }
+}
+
 /** 週次 diff レポート。最新 1 件。 */
 export async function loadDiffReport() {
   const rows = await select(
@@ -962,8 +981,100 @@ function diffRow(stock) {
 /** 分岐棒に載せる本数（上昇・下降それぞれ）。 */
 const MOVERS = 6;
 
-export function renderWeekly(root, report) {
+/** 比率（0.0123）を「+1.23%」に。 */
+function fmtPct(value) {
+  const n = num(value);
+  if (!Number.isFinite(n)) return { text: "—", kind: "flat" };
+  const body = (Math.abs(n) * 100).toFixed(2);
+  if (n === 0) return { text: `${body}%`, kind: "flat" };
+  return { text: `${n > 0 ? "+" : "−"}${body}%`, kind: n > 0 ? "up" : "down" };
+}
+
+function pctChip(value) {
+  const { text, kind } = fmtPct(value);
+  return el("span", `delta ${kind}`, text);
+}
+
+function candidateRow(pick) {
+  const line = el("div", "srow");
+  const label = el("div", "srow-label");
+  label.append(el("span", "cand-rank mono", String(pick.rank ?? "")));
+  label.append(el("span", "ticker", pick.code));
+  label.append(el("span", "name", pick.name || ""));
+  line.append(label);
+
+  const right = el("div", "srow-right");
+  const level = pick.earnings?.level;
+  if (level && level !== "none") {
+    right.append(el("span", `cand-earn ${level}`, pick.earnings.label || ""));
+  }
+  right.append(el("span", "cand-score mono", `${fmtScore(pick.total_score)}点`));
+  right.append(el("span", "nav-arrow", "›"));
+  line.append(right);
+  return linkTo(line, pick.code);
+}
+
+function candidatesSection(candidates) {
+  const p = candidates.payload;
+  const period = p.entry_date && p.exit_date
+    ? `${p.entry_date.slice(5).replace("-", "/")}〜${p.exit_date.slice(5).replace("-", "/")}`
+    : fmtDate(candidates.week_start);
+  const sec = block("今週の候補TOP5", period);
+
+  const list = el("div", "rows");
+  for (const pick of Array.isArray(p.picks) ? p.picks : []) list.append(candidateRow(pick));
+  sec.append(list);
+
+  const facts = [`${fmtDate(p.judge_date)} の採点`];
+  if (Number.isFinite(num(p.population))) facts.push(`対象 ${p.population} 銘柄`);
+  sec.append(el("p", "note", facts.join("・")));
+  if (p.oos === false) sec.append(el("p", "note", "試運転の週です。答え合わせの判定には数えません。"));
+
+  const last = p.last_week;
+  if (last) {
+    const box = el("section", "summary-card");
+    box.append(el("h2", null, `先週の答え合わせ（${fmtDate(last.week_start)} の週）`));
+    const grid = el("div", "cand-result");
+    for (const [title, value] of [
+      ["候補の平均", last.return_top],
+      ["採点対象の平均", last.return_universe],
+      ["差", last.excess],
+    ]) {
+      const cell = el("div", "cand-result-cell");
+      cell.append(el("span", "cand-result-label", title));
+      cell.append(pctChip(value));
+      grid.append(cell);
+    }
+    box.append(grid);
+    const names = el("div", "cand-names");
+    for (const item of Array.isArray(last.names) ? last.names : []) {
+      const row = el("div", "cand-name-row");
+      row.append(el("span", "name", item.name || item.code));
+      row.append(pctChip(item.return));
+      names.append(row);
+    }
+    box.append(names);
+    sec.append(box);
+  }
+
+  const record = p.record;
+  if (record) {
+    const line = record.points
+      ? `記録 ${record.points} / ${record.target} 週・差の平均 ${fmtPct(record.mean_excess).text}・プラスの週 ${record.positive_weeks}`
+      : `記録 0 / ${record.target} 週`;
+    sec.append(el("p", "note", `${line}。${record.target} 週に届くまでは参考です。`));
+  }
+  if (p.checkpoint?.verdict) {
+    sec.append(el("p", "note", `${record?.target ?? 20} 週の判定：${p.checkpoint.verdict}`));
+  }
+  sec.append(el("p", "disclaimer", p.note || "調べる入り口として絞ったものです。買い推奨ではありません。"));
+  return sec;
+}
+
+export function renderWeekly(root, report, candidates = null) {
   root.textContent = "";
+
+  if (candidates?.payload) root.append(candidatesSection(candidates));
 
   if (!report || !report.payload) {
     root.append(
